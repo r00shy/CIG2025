@@ -1,8 +1,9 @@
 from numpy.random import choice, multinomial
-
+from collections import defaultdict
 from vgc2.agent import TeamBuildPolicy, TeamBuildCommand
 from vgc2.battle_engine.modifiers import Nature, Type
 from vgc2.battle_engine.move import Move
+from vgc2.battle_engine.pokemon import PokemonSpecies
 from vgc2.meta import Meta, Roster
 
 
@@ -19,7 +20,7 @@ class DoubleLTeamBuildPolicy(TeamBuildPolicy):
                  n_active: int) -> TeamBuildCommand:
         
         ivs = (31,) * 6 # ivs = (31, 31, 31, 31, 31, 31) = perfect individual values
-        ids = choice(len(roster), max_team_size, False) # TODO: Choose with strategy
+        ids = choose_optimal_pokemon(roster, max_team_size) # choice(len(roster), max_team_size, False) # TODO: Choose with strategy
         cmds: TeamBuildCommand = []
         for i in range(len(ids)):
             # Choose the role of the pokemon based on the stats
@@ -146,3 +147,50 @@ def choose_optimal_moveset(pokemonTypes: list[Type], moves: list[Move], max_pkm_
                 if len(list_of_moves) == max_pkm_moves:
                     break
     return list_of_moves
+
+def choose_optimal_pokemon(roster: list[PokemonSpecies], max_team_size: int) -> list[int]:
+    from collections import defaultdict
+
+    # Step 1: Group Pokémon by their type combination
+    groups = defaultdict(list)
+    for p in roster:
+        key = tuple(sorted(p.types))
+        groups[key].append(p)
+
+    # Step 2: Define a basic type synergy scoring function
+    def type_synergy_score(type_combo: tuple[Type]) -> int:
+        """
+        Higher score means better synergy.
+        - Favors diversity (2 distinct types).
+        - Penalizes common weaknesses.
+        - Could be extended with resistances and immunities.
+        """
+        score = 0
+        if len(set(type_combo)) == 2:
+            score += 10  # bonus for dual types
+        # Example bonuses for some known good pairings
+        good_synergies = [
+            (Type.FAIRY, Type.STEEL), (Type.WATER, Type.GROUND), (Type.DRAGON, Type.FLYING),
+            (Type.BUG, Type.STEEL), (Type.DARK, Type.GHOST), (Type.GROUND, Type.FLYING)
+        ]
+        if type_combo in good_synergies or tuple(reversed(type_combo)) in good_synergies:
+            score += 20
+        return score
+
+    # Step 3: Compute synergy scores
+    scored_type_combos = sorted(
+        groups.items(),
+        key=lambda item: type_synergy_score(item[0]),
+        reverse=True
+    )
+
+    # Step 4: From each of the top scoring type combos, choose the Pokémon with highest stats
+    best_pokemon = []
+    for type_combo, pokemon_list in scored_type_combos:
+        top_pokemon = max(pokemon_list, key=lambda p: sum(p.base_stats))
+        best_pokemon.append(top_pokemon)
+        if len(best_pokemon) >= max_team_size:
+            break
+
+    # Step 5: Return the IDs of the selected Pokémon
+    return [p.id for p in best_pokemon]
