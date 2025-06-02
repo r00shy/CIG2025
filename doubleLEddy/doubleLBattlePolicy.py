@@ -24,18 +24,33 @@ class DoubleLBattlePolicy(BattlePolicy):
     def decision(self,
                  state: State,
                 opp_view: Optional[TeamView] = None) -> list[BattleCommand]:
-        team = state.sides[0].team
-        n_switches = len(team.reserve)
-        n_targets = len(state.sides[1].team.active)
-        cmds: list[BattleCommand] = []
-        for pkm in team.active:
-            n_moves = len(pkm.battling_moves)
-            switch_prob = 0 if n_switches == 0 else self.switch_prob
-            action = choice(n_moves + 1, p=[switch_prob] + [(1. - switch_prob) / n_moves] * n_moves) - 1
-            if action >= 0:
-                target = choice(n_targets, p=[1 / n_targets] * n_targets)
-            else:
-                target = choice(n_switches, p=[1 / n_switches] * n_switches)
-            cmds += [(action, target)]
-        return cmds
+        commands = []
+        my_team = state.sides[0].team
+        opponent_team = state.sides[1].team
+        field = state.field  # Initialize the field; adjust as per your game's context
+
+        for my_pokemon in my_team.active:
+            best_move_index = None
+            best_target_index = None
+            max_damage = -1
+
+            for move_index, move in enumerate(my_pokemon.battling_moves):
+                for target_index, opponent_pokemon in enumerate(opponent_team.active):
+                    damage = calculate_damage(
+                        params= BattleRuleParam(),
+                        attacking_side=0,
+                        move=move.constants,
+                        state= state,
+                        attacker= my_pokemon,
+                        defender= opponent_pokemon
+                    )
+                    if (damage >max_damage):
+                        max_damage = damage
+                        best_move_index = move_index
+                        best_target_index = target_index
+
+            if best_move_index is not None and best_target_index is not None:
+                commands.append((best_move_index, best_target_index))
+
+        return commands
 
