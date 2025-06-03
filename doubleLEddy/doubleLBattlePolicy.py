@@ -27,30 +27,88 @@ class DoubleLBattlePolicy(BattlePolicy):
         commands = []
         my_team = state.sides[0].team
         opponent_team = state.sides[1].team
-        field = state.field  # Initialize the field; adjust as per your game's context
 
+        # Variables to store best and alternative moves/targets per Pokémon
+        best_move_indices = []
+        best_target_indices = []
+        max_damages = []
+        alt_move_indices = []
+        alt_target_indices = []
+        alt_max_damages = []
+
+        # Loop exactly as you wrote it (assuming two active Pokémon)
         for my_pokemon in my_team.active:
             best_move_index = None
             best_target_index = None
             max_damage = -1
+            alternativ_move_index = None
+            alternativ_target_index = None
+            alternativ_max_damage = -1
 
             for move_index, move in enumerate(my_pokemon.battling_moves):
                 for target_index, opponent_pokemon in enumerate(opponent_team.active):
                     damage = calculate_damage(
-                        params= BattleRuleParam(),
+                        params=BattleRuleParam(),
                         attacking_side=0,
                         move=move.constants,
-                        state= state,
-                        attacker= my_pokemon,
-                        defender= opponent_pokemon
+                        state=state,
+                        attacker=my_pokemon,
+                        defender=opponent_pokemon
                     )
-                    if (damage >max_damage):
+                    if damage > max_damage:
+                        if target_index != best_target_index:
+                            alternativ_move_index = best_move_index
+                            alternativ_target_index = best_target_index
+                            alternativ_max_damage = max_damage
+
                         max_damage = damage
                         best_move_index = move_index
                         best_target_index = target_index
+                    elif damage > alternativ_max_damage and target_index != best_target_index:
+                        alternativ_max_damage = damage
+                        alternativ_move_index = move_index
+                        alternativ_target_index = target_index
 
-            if best_move_index is not None and best_target_index is not None:
-                commands.append((best_move_index, best_target_index))
+            best_move_indices.append(best_move_index)
+            best_target_indices.append(best_target_index)
+            max_damages.append(max_damage)
+            alt_move_indices.append(alternativ_move_index)
+            alt_target_indices.append(alternativ_target_index)
+            alt_max_damages.append(alternativ_max_damage)
+
+        # If both sides have only one Pokémon active, just add one command
+        if len(my_team.active) == 1 and len(opponent_team.active) == 1:
+            commands.append((best_move_indices[0], best_target_indices[0]))
+            return commands
+
+        # If you have only one Pokémon, just add one command
+        if len(my_team.active) == 1:
+            commands.append((best_move_indices[0], best_target_indices[0]))
+            return commands
+
+        # If opponent only has one Pokémon, both attack the same target
+        if len(opponent_team.active) == 1:
+            commands.append((best_move_indices[0], best_target_indices[0]))
+            commands.append((best_move_indices[1], best_target_indices[0]))
+            return commands
+
+        # Now apply the lethal check and select final commands
+        # Check if Pokémon 0's best move is lethal
+        if (best_target_indices[0] is not None and
+            max_damages[0] >= opponent_team.active[best_target_indices[0]].hp):
+            # If lethal, second Pokémon tries alternative move if it targets a different Pokémon
+            if (alt_target_indices[1] is not None and
+                alt_target_indices[1] != best_target_indices[0]):
+                commands.append((best_move_indices[0], best_target_indices[0]))
+                commands.append((alt_move_indices[1], alt_target_indices[1]))
+            else:
+                # fallback to best move
+                commands.append((best_move_indices[0], best_target_indices[0]))
+                commands.append((best_move_indices[1], best_target_indices[1]))
+        else:
+            # No lethal move by first Pokémon, both use best moves
+            commands.append((best_move_indices[0], best_target_indices[0]))
+            commands.append((best_move_indices[1], best_target_indices[1]))
 
         return commands
 
