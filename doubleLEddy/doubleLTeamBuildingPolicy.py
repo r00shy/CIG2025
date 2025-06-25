@@ -24,14 +24,13 @@ class DoubleLTeamBuildPolicy(TeamBuildPolicy):
         top_indices = select_top_offensive_pokemon(roster)
         cmds: TeamBuildCommand = []
 
-        min_power = 60  # initial power threshold
+        min_power = 0  # initial power threshold
         required_count = 4
 
         # Make a copy to safely modify
         valid_indices = top_indices.copy()
 
         while len(valid_indices) > required_count:
-            # Filter candidates while ensuring we never drop below required_count
             filtered = []
 
             for i in valid_indices:
@@ -46,16 +45,12 @@ class DoubleLTeamBuildPolicy(TeamBuildPolicy):
                 if has_two_strong_offensive_moves(roster[i].moves, role, min_power):
                     filtered.append(i)
 
-                # Stop early if we hit the required minimum
-                if len(filtered) == required_count:
-                    break
-
-            # If filtering dropped too many, stop and keep the best we found
+            # Stop if filtering would drop below required_count
             if len(filtered) < required_count:
                 break
 
             valid_indices = filtered
-            min_power += 5  # increase requirement only if more than enough are left
+            min_power += 5  # increase requirement for next round
 
         top4_indices = valid_indices[:required_count]
 
