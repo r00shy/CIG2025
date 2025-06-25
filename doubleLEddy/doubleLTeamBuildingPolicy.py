@@ -1,5 +1,7 @@
 from numpy.random import choice, multinomial
 
+from typing import List
+from vgc2.battle_engine.modifiers import Category, Status, Hazard, Weather, Terrain, Type
 from vgc2.agent import TeamBuildPolicy, TeamBuildCommand
 from vgc2.battle_engine.modifiers import Nature, Type
 from vgc2.battle_engine.move import Move
@@ -12,124 +14,132 @@ class DoubleLTeamBuildPolicy(TeamBuildPolicy):
     """
 
     def decision(self,
-                 roster: Roster,
-                 meta: Meta | None,
-                 max_team_size: int,
-                 max_pkm_moves: int,
-                 n_active: int) -> TeamBuildCommand:
-        
-        ivs = (31,) * 6 # ivs = (31, 31, 31, 31, 31, 31) = perfect individual values
-        ids = choice(len(roster), max_team_size, False) # TODO: Choose with strategy
+                roster: Roster,
+                meta: Meta | None,
+                max_team_size: int,
+                max_pkm_moves: int,
+                n_active: int) -> TeamBuildCommand:
+
+        ivs = (31,) * 6
+        top_indices = select_top_offensive_pokemon(roster)
         cmds: TeamBuildCommand = []
-        for i in range(len(ids)):
-            # Choose the role of the pokemon based on the stats
-            statDict = {
+
+        min_power = 60  # initial power threshold
+        required_count = 4
+
+        # Make a copy to safely modify
+        valid_indices = top_indices.copy()
+
+        while len(valid_indices) > required_count:
+            # Filter candidates while ensuring we never drop below required_count
+            filtered = []
+
+            for i in valid_indices:
+                stats = {
+                    'ATK': roster[i].base_stats[1],
+                    'S_ATK': roster[i].base_stats[2],
+                    'SPD': roster[i].base_stats[5]
+                }
+
+                role = infer_pokemon_role(stats)
+
+                if has_two_strong_offensive_moves(roster[i].moves, role, min_power):
+                    filtered.append(i)
+
+                # Stop early if we hit the required minimum
+                if len(filtered) == required_count:
+                    break
+
+            # If filtering dropped too many, stop and keep the best we found
+            if len(filtered) < required_count:
+                break
+
+            valid_indices = filtered
+            min_power += 5  # increase requirement only if more than enough are left
+
+        top4_indices = valid_indices[:required_count]
+
+        for i in top4_indices:
+            stats = {
                 'ATK': roster[i].base_stats[1],
                 'S_ATK': roster[i].base_stats[2],
-                'DEF': roster[i].base_stats[3],
-                'S_DEF': roster[i].base_stats[4],
                 'SPD': roster[i].base_stats[5]
             }
-            role = infer_pokemon_role(statDict) 
-            # print(role)
-            # print(roster[i].base_stats)
-            # print(roster[i].moves[0])
-            n_moves = len(roster[i].moves) # no need to change; number of moves (probably 4)
 
+            role = infer_pokemon_role(stats)
+            evs = tuple(multinomial(510, [1 / 6] * 6, size=1)[0])
+            nature = choose_optimal_nature_role_based(stats, role)
             moves = choose_optimal_moveset(roster[i].types, roster[i].moves, max_pkm_moves, role) 
-            # moves = list(choice(n_moves, min(max_pkm_moves, n_moves), False)) # DEFAULT VERSION
-            evs = tuple(multinomial(510, [1 / 6] * 6, size=1)[0]) # this is in alignment with the rules; Each of the 6 stats has an equal probability of receiving EVs; overall less than or equal to 510
             
-            nature = choose_optimal_nature_role_based(statDict, role)
-            cmds += [(i, evs, ivs, nature, moves)]
+            cmds.append((i, evs, ivs, nature, moves))
+
         return cmds
     
+def select_top_offensive_pokemon(roster: Roster, top_n: int = 30) -> list[int]:
+    # Build a list of (index, offensive stat) pairs
+    indexed_stats = [
+        (i, max(pokemon.base_stats[1], pokemon.base_stats[2]))  # ATK = index 1, S_ATK = index 2
+        for i, pokemon in enumerate(roster)
+    ]
+
+    # Sort by offensive stat descending
+    indexed_stats.sort(key=lambda x: x[1], reverse=True)
+
+    # Extract the top N indices
+    top_indices = [i for i, _ in indexed_stats[:top_n]]
+
+    return top_indices
+
+def has_two_strong_offensive_moves(moves: List[Move], role: Category, min_power: int) -> bool:
+    strong_moves = set()
+
+    cat = role_to_category(role)
+    for move in moves:
+        if move.category == cat and move.base_power >= min_power:
+            strong_moves.add(move.pkm_type)
+
+        if len(strong_moves) >= 2:
+            return True
+
+    return False
+
+def role_to_category(role: str) -> Category:
+    role = role.lower()
+    if "physical" in role:
+        return Category.PHYSICAL
+    else:
+        return Category.SPECIAL
 
 def choose_optimal_nature_role_based(stats: dict, role: str) -> Nature:
-    nature_chart = {
-        ('ATK', 'S_ATK'): Nature.ADAMANT,
-        ('ATK', 'S_DEF'): Nature.NAUGHTY,
-        ('ATK', 'DEF'): Nature.LONELY,
-        ('ATK', 'SPD'): Nature.BRAVE,
-        ('S_ATK', 'ATK'): Nature.MODEST,
-        ('S_ATK', 'DEF'): Nature.MILD,
-        ('S_ATK', 'S_DEF'): Nature.RASH,
-        ('S_ATK', 'SPD'): Nature.QUIET,
-        ('SPD', 'ATK'): Nature.TIMID,
-        ('SPD', 'DEF'): Nature.HASTY,
-        ('SPD', 'S_ATK'): Nature.JOLLY,
-        ('SPD', 'S_DEF'): Nature.NAIVE,
-        ('DEF', 'ATK'): Nature.BOLD,
-        ('DEF', 'S_ATK'): Nature.IMPISH,
-        ('DEF', 'SPD'): Nature.RELAXED,
-        ('DEF', 'S_DEF'): Nature.LAX,
-        ('S_DEF', 'ATK'): Nature.CALM,
-        ('S_DEF', 'S_ATK'): Nature.CAREFUL,
-        ('S_DEF', 'DEF'): Nature.GENTLE,
-        ('S_DEF', 'SPD'): Nature.SASSY
-    }
+    atk = stats.get('ATK', 0)
+    s_atk = stats.get('S_ATK', 0)
+    spd = stats.get('SPD', 0)
 
-    role_boost_map = {
-        'physical_attacker': 'ATK',
-        'special_attacker': 'S_ATK',
-        'speedster': 'SPD',
-        'physical_wall': 'DEF',
-        'special_wall': 'S_DEF',
-        'trick_room': 'ATK'  # Trick Room attackers often prioritize ATK, don't mind low SPD
-    }
+    if spd > 100:
+        # Fast Pokémon get speed-boosting nature
+        if role == 'physical_attacker':
+            return Nature.JOLLY  # +SPD, -S_ATK
+        elif role == 'special_attacker':
+            return Nature.TIMID  # +SPD, -ATK
+    else:
+        # Otherwise, boost the attack stat and reduce the other
+        if role == 'physical_attacker':
+            return Nature.ADAMANT  # +ATK, -S_ATK
+        elif role == 'special_attacker':
+            return Nature.MODEST  # +S_ATK, -ATK
 
-    safe_reduce_map = {
-        'physical_attacker': ['S_ATK', 'S_DEF'],
-        'special_attacker': ['ATK', 'DEF'],
-        'speedster': ['S_ATK', 'DEF', 'S_DEF'],
-        'physical_wall': ['S_ATK', 'SPD'],
-        'special_wall': ['ATK', 'SPD'],
-        'trick_room': ['SPD', 'S_ATK', 'S_DEF']
-    }
-
-    boost = role_boost_map.get(role)
-    safe_to_reduce = [s for s in safe_reduce_map.get(role, []) if s != boost]
-    
-    # Choose the stat to reduce (lowest value among safe options)
-    reduce = min(safe_to_reduce, key=lambda s: stats.get(s, float('inf')))
-
-    nature = nature_chart.get((boost, reduce), 'Hardy')
-
-    return nature
+    return Nature.HARDY  # fallback neutral
     
 def infer_pokemon_role(stats: dict) -> str:
     atk = stats.get('ATK', 0)
     s_atk = stats.get('S_ATK', 0)
-    def_ = stats.get('DEF', 0)
-    s_def = stats.get('S_DEF', 0)
     spd = stats.get('SPD', 0)
 
-    # Trick Room candidate: low speed and good offense
-    if spd < 60 and (atk > 90 or s_atk > 90):
-        return 'trick_room'
-
-    # Speedster: very fast and offensive
-    if spd > 100 and (atk > 85 or s_atk > 85):
-        return 'speedster'
-
-    # Physical Attacker
-    if atk >= max(s_atk, def_, s_def, spd):
+    # Speed is important: if one attacker type is clearly stronger and the Pokémon is fast, prefer that
+    if atk >= s_atk:
         return 'physical_attacker'
-
-    # Special Attacker
-    if s_atk >= max(atk, def_, s_def, spd):
+    else:
         return 'special_attacker'
-
-    # Physical Wall
-    if def_ >= max(atk, s_atk, s_def, spd):
-        return 'physical_wall'
-
-    # Special Wall
-    if s_def >= max(atk, s_atk, def_, spd):
-        return 'special_wall'
-
-    # Fallback default
-    return 'physical_attacker'
 
 def choose_optimal_moveset(pokemonTypes: list[Type], moves: list[Move], max_pkm_moves, role) -> list[int]:
     # TODO: Implement a more sophisticated moveset selection based on role
