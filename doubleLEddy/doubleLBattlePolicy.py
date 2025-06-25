@@ -71,11 +71,11 @@ class DoubleLBattlePolicy(BattlePolicy):
                         alternativ_move_index = move_index
                         alternativ_target_index = target_index
 
-            best_move_indices.append(best_move_index)
-            best_target_indices.append(best_target_index)
+            best_move_indices.append(best_move_index if best_move_index is not None else 0)
+            best_target_indices.append(best_target_index if best_target_index is not None else 0)
             max_damages.append(max_damage)
-            alt_move_indices.append(alternativ_move_index)
-            alt_target_indices.append(alternativ_target_index)
+            alt_move_indices.append(alternativ_move_index if alternativ_move_index is not None else 0)
+            alt_target_indices.append(alternativ_target_index if alternativ_target_index is not None else 0)
             alt_max_damages.append(alternativ_max_damage)
 
         # If you have only one Pokémon, just add one command
