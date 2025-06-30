@@ -38,7 +38,6 @@ class DoubleLBattlePolicy(BattlePolicy):
         alt_target_indices = []
         alt_max_damages = []
 
-        # Loop exactly as you wrote it (assuming two active Pokémon)
         for my_pokemon in my_team.active:
             best_move_index = None
             best_target_index = None
@@ -83,8 +82,8 @@ class DoubleLBattlePolicy(BattlePolicy):
             commands.append((best_move_indices[0], best_target_indices[0]))
             return commands
 
-        # If opponent only has one Pokémon and your pokemon have different targets, both use the best move
-        if len(opponent_team.active) == 1 or best_target_indices[0] != best_move_indices[1]:
+        # If opponent only has one Pokémon or your pokemon have different targets, both use the best move
+        if len(opponent_team.active) == 1 or best_target_indices[0] != best_target_indices[1]:
             commands.append((best_move_indices[0], best_target_indices[0]))
             commands.append((best_move_indices[1], best_target_indices[1]))
             return commands
@@ -100,7 +99,6 @@ class DoubleLBattlePolicy(BattlePolicy):
             fasterIndex = 1
             slowerIndex = 0
         
-        # Now apply the lethal check and select final commands
         # Check if faster Pokémon has a lethal move
         if (max_damages[fasterIndex] >= opponent_team.active[best_target_indices[fasterIndex]].hp):
             if (fasterIndex == 0):
